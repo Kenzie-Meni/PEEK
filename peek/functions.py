@@ -144,7 +144,6 @@ def plot_PEEK(modules, frame_paths, feature_folder, save_path=False, run_path=Fa
             fig.savefig(save_fig_path)
             fig.clear()
 
-
 #this is very nice
 # def plot_PEEK(modules, frame_paths, feature_folder, save_path=False, run_path=False, verbose=False):
     
