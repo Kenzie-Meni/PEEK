@@ -1,0 +1,13 @@
+names:
+- Antenna
+- Body
+- Solar
+- Thruster
+nc: 4
+roboflow:
+  license: Private
+  project: tracker_comp_light
+  workspace: forairoboflow-gmail-com
+test: ../test/images
+train: train/images
+val: valid/images
