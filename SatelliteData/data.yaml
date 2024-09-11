@@ -8,6 +8,6 @@ roboflow:
   license: Private
   project: tracker_comp_light
   workspace: forairoboflow-gmail-com
-test: ../test/images
-train: train/images
-val: valid/images
+test: ../SatelliteData/images
+train: ../SatelliteData/images
+val: ../SatelliteData/images
