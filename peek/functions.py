@@ -4,6 +4,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pickle
+from PIL import Image
+import torch
+import torchvision.models as models
+import torchvision.transforms as transforms
 
 from pathlib import Path
 from scipy.special import entr
@@ -26,7 +30,9 @@ def plot_PEEK(modules, frame_paths, feature_folder, save_path=False, run_path=Fa
     for frame_path in frame_paths:
         # find filename and path to feature maps
         frame_filename = os.path.split(frame_path)[-1]
-        feature_map_path = f'{feature_folder}/{frame_filename[:-4]}.pkl'
+        # frame_filename = os.path.split(image_path)[-1].split('.')[0]
+
+        feature_map_path = f"{feature_folder}/{frame_filename.split('.')[0]}.pkl"
         
         # make subplots -- 3 columns if we include inferred images
         if run_path:
@@ -61,7 +67,7 @@ def plot_PEEK(modules, frame_paths, feature_folder, save_path=False, run_path=Fa
             
             # add column titles
             if i==0:
-                axes[i,0].set_title('Input Image')
+                axes[i,0].set_title('Input')
                 axes[i,1].set_title('PEEK')
                 if run_path: axes[i,2].set_title('Predictions')
                
@@ -96,3 +102,53 @@ def plot_PEEK(modules, frame_paths, feature_folder, save_path=False, run_path=Fa
             # save figure
             fig.savefig(save_fig_path)
             fig.clear()
+
+class VGG16FeatureExtractor(torch.nn.Module):
+    def __init__(self, weights='DEFAULT'):
+        super(VGG16FeatureExtractor, self).__init__()
+        self.vgg16 = models.vgg16(weights=weights).features
+        # Automatically collect indices of all convolutional layers
+        self.conv_layers = [i for i, layer in enumerate(self.vgg16) if isinstance(layer, torch.nn.Conv2d)]
+
+    def forward(self, x):
+        features = []
+        for layer_index, layer in enumerate(self.vgg16):
+            x = layer(x)
+            if layer_index in self.conv_layers:
+                features.append(x)
+        return features
+
+    def load_image(self, image_path):
+        # Load an image and transform it to the format required by VGG16
+        transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        image = Image.open(image_path)
+        image = transform(image).unsqueeze(0)  # Add batch dimension
+        return image
+
+    def save_features(self, frame_folder):
+        _, save_folder = frame_folder.split('/')
+        feature_folder = f'feature_maps/{save_folder}'
+
+        Path(feature_folder).mkdir(parents=True, exist_ok=True)
+
+        image_filepaths = sorted(glob.glob(f'{frame_folder}/*'))
+
+        for image_path in image_filepaths:
+            
+            input_tensor = self.load_image(image_path)
+            
+            with torch.no_grad():
+                features = self.forward(input_tensor)
+
+            # Create a base filename for saving features without the original extension
+            base_filename = os.path.split(image_path)[-1].split('.')[0]
+            
+            filename = f'feature_maps/{save_folder}/{base_filename}.pkl'
+            with open(filename, "wb") as f:
+                pickle.dump([feature for feature in features], f)
+            print(f"Saved all features to {filename}")
