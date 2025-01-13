@@ -8,7 +8,7 @@ Currently, we provide a modified YOLOv5 implementation with the repo as well as 
 
 UPDATES:
 
-* Jan 2025: New notebook with a demo of PEEK used with VGG16 image classifier pretrained on ImageNet, added sample images.
+* Jan 2025: New notebook with a demo of PEEK used with a VGG16 image classifier pretrained on ImageNet (implemented in PyTorch), added sample images locally.
 
 Use of the PEEK method should cite the original paper:
 
