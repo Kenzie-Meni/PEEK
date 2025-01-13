@@ -6,6 +6,10 @@ The implementation currently works for YOLOv5 and arbitrary Keras CNNs. More wil
 
 Currently, we provide a modified YOLOv5 implementation with the repo as well as a notebook demonstrating use of PEEK with YOLOv5.
 
+UPDATES:
+
+* Jan 2025: New notebook with a demo of PEEK used with VGG16 image classifier pretrained on ImageNet, added sample images.
+
 Use of the PEEK method should cite the original paper:
 
 >M. Meni, T. Mahendrakar, O. D. Raney, R. T. White, M. L. Mayo, and K. R. Pilkiewicz (2024). Taking a PEEK into YOLOv5 for Satellite Component Recognition via Entropy-based Visual Explanations. *AIAA SCITECH 2024 Forum*. https://arc.aiaa.org/doi/abs/10.2514/6.2024-2766
