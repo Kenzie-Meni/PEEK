@@ -1,0 +1,5 @@
+# generated feature dumps
+feature_maps/
+
+# YOLOv5 training outputs
+yolov5/runs/
