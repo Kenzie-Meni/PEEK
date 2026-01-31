@@ -1,5 +1,13 @@
-# generated feature dumps
+# Artifacts
+runs/
 feature_maps/
 
-# YOLOv5 training outputs
-yolov5/runs/
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
