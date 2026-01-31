@@ -1,0 +1,8 @@
+Repository: https://github.com/ultralytics/ultralytics
+Pinned commit: 40eb41ac3032958ef54bece0d8b262e196af3259
+Pinned tag: N/A
+Date pinned: 2026-01-31
+
+Notes:
+- Used for PEEK latent extraction via forward hooks
+- Accessed as git submodule (no vendored edits)
