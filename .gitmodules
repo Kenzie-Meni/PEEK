@@ -1,3 +1,6 @@
 [submodule "third_party/yolov5"]
 	path = third_party/yolov5
 	url = https://github.com/ultralytics/yolov5
+[submodule "third_party/ultralytics"]
+	path = third_party/ultralytics
+	url = https://github.com/ultralytics/ultralytics
