@@ -1,4 +1,7 @@
-from .core import PEEK
+"""
+PEEK package public API.
+"""
+
 from .plotting import plot_PEEK
 
-__all__ = ["PEEK", "plot_PEEK"]
+__all__ = ["plot_PEEK"]
