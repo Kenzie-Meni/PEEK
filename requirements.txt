@@ -1,0 +1,22 @@
+# Core numerics/plotting (keep numpy < 2 for broad wheel compatibility)
+numpy<2
+scipy>=1.4.1
+matplotlib>=3.3.0
+opencv-python>=4.6.0
+pillow>=7.1.2
+
+# Utilities
+pyyaml>=5.3.1
+requests>=2.23.0
+psutil>=5.8.0
+polars>=0.20.0
+
+# Ultralytics uses THOP; pip package name differs from import name ("thop")
+ultralytics-thop>=2.0.18
+
+# TOML reader for Python < 3.11
+tomli>=2.0.1; python_version < "3.11"
+
+# Torch (install CUDA build separately if desired; leave unpinned here)
+torch>=1.8.0
+torchvision>=0.9.0
