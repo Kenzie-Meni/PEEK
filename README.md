@@ -2,13 +2,7 @@
 
 This is the official GitHub repository for Probabilistic Explanations for Entropic Knowledge extraction (PEEK), a method for visualizing CNN decisionmaking processes.
 
-The implementation currently works for YOLOv5 and arbitrary Keras CNNs. More will be added in the future. Requests for implementations for specific architectures should go to the owner of the repo and lead developer, Mackenzie Meni.
-
-Currently, we provide a modified YOLOv5 implementation with the repo as well as a notebook demonstrating use of PEEK with YOLOv5.
-
-UPDATES:
-
-* Jan 2025: New notebook with a demo of PEEK used with a VGG16 image classifier pretrained on ImageNet (implemented in PyTorch), added sample images locally.
+The implementation currently works for YOLO (v5, v8, v11, 26). More will be added in the future. Requests for implementations for specific architectures should go to the owner of the repo and lead developer, Mackenzie Meni.
 
 Use of the PEEK method should cite the original paper:
 
@@ -28,10 +22,10 @@ Bibtex:
 
 ## Third-party models
 
-This repository uses external model implementations as Git submodules
-to avoid vendoring large upstream codebases.
+This repository uses external model implementations as Git submodules to avoid vendoring large upstream codebases.
 
 - YOLOv5: `third_party/yolov5` (Ultralytics, v7.0)
+- Ultralytics: `third_party/ultralytics` (for YOLOv8/11/26)
 
 All modifications for latent extraction and PEEK are implemented via
 PyTorch forward hooks (see `peek/`), not by modifying upstream code.
