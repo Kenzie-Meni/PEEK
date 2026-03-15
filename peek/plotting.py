@@ -43,6 +43,23 @@ def _iter_images(image_dir: Path, limit: int = 0) -> List[Path]:
     return paths
 
 
+def _find_prediction_image(pred_dir: Path, image_path: Path) -> Optional[Path]:
+    """
+    Match a prediction image by stem so differing input/output extensions still resolve.
+    """
+    exact = pred_dir / image_path.name
+    if exact.exists():
+        return exact
+
+    for ext in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"):
+        candidate = pred_dir / f"{image_path.stem}{ext}"
+        if candidate.exists():
+            return candidate
+
+    matches = sorted(p for p in pred_dir.glob(f"{image_path.stem}.*") if p.is_file() and _is_image(p))
+    return matches[0] if matches else None
+
+
 # -----------------------
 # PEEK math (original)
 # -----------------------
@@ -55,11 +72,7 @@ def _peek_entropy_map_hwc(feature_maps_hwc: np.ndarray) -> np.ndarray:
     from scipy.special import entr  # local import
 
     x = feature_maps_hwc.astype(np.float32, copy=False)
-
-    # Shift so the minimum becomes zero (same behavior as your original)
     x = x + float(np.abs(np.min(x)))
-
-    # Elementwise entr(x) = -x * log(x) with entr(0) = 0
     h = -np.sum(entr(x), axis=-1)
     return h.astype(np.float32, copy=False)
 
@@ -82,13 +95,26 @@ def _tensor_to_hwc(t: torch.Tensor) -> Optional[np.ndarray]:
       - (B,C,H,W) -> use batch 0 -> HWC
       - (C,H,W)   -> HWC
       - (H,W,C)   -> passthrough
+      - (B,H,W,C) -> use batch 0 -> HWC
     """
     if not isinstance(t, torch.Tensor):
         return None
 
     if t.ndim == 4:
-        t0 = t[0]
-        return t0.detach().float().cpu().permute(1, 2, 0).contiguous().numpy()
+        b, d1, d2, d3 = t.shape
+        
+        # Check if this looks like (B,H,W,C) format
+        # Last dim is reasonable channel count and middle dims look spatial
+        channel_counts = {64, 128, 256, 512, 768, 1024, 2048, 4096}
+        if d3 in channel_counts and d1 >= 4 and d2 >= 4:
+            # Likely (B,H,W,C) -> already HWC after taking batch 0
+            return t[0].detach().float().cpu().contiguous().numpy()
+        elif d1 in channel_counts and d2 >= 4 and d3 >= 4:
+            # Likely (B,C,H,W) -> permute to HWC
+            return t[0].detach().float().cpu().permute(1, 2, 0).contiguous().numpy()
+        else:
+            # Fallback: assume (B,C,H,W) and permute
+            return t[0].detach().float().cpu().permute(1, 2, 0).contiguous().numpy()
 
     if t.ndim == 3:
         # Heuristic: if first dim looks like channels, treat as CHW
@@ -420,12 +446,13 @@ def plot_PEEK(
                 else:
                     peek_hw = _peek_entropy_map_hwc(hwc)
                     peek_hw = _resize_map_hw(peek_hw, out_h=h, out_w=w)
+
                     axes[i, 1].imshow(peek_hw, alpha=0.7, cmap="jet")
 
             # Predictions
             if pred_dir is not None:
-                pred_img_path = pred_dir / img_path.name
-                if pred_img_path.exists():
+                pred_img_path = _find_prediction_image(pred_dir, img_path)
+                if pred_img_path is not None:
                     pred_img = plt.imread(str(pred_img_path))
                     axes[i, 2].imshow(pred_img)
                 else:

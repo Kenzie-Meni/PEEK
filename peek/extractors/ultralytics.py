@@ -151,7 +151,13 @@ def extract_ultralytics_latents(
     target = _hook_target(torch_model)
 
     # Attach hooks
-    extractor = LatentExtractor(target, modules=modules, to_cpu=to_cpu, fp16=fp16)
+    extractor = LatentExtractor(
+        target,
+        modules=modules,
+        to_cpu=to_cpu,
+        fp16=fp16,
+        target_mode="top_level",
+    )
     extractor.start()
 
     paths = _iter_images(image_dir_p, limit=limit)

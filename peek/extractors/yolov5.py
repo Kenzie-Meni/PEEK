@@ -107,17 +107,36 @@ def extract_yolov5_latents(
 
     import cv2  # local import
 
-    # Collect input images
+    # Load model backend
+    device_obj = select_device(device)
+
+    # Collect input images using repo-root-relative glob resolution
     g = _resolve_glob(images_glob)
     paths = sorted(glob.glob(g))
     if limit and limit > 0:
         paths = paths[:limit]
     if not paths:
         raise FileNotFoundError(f"No images matched: {images_glob} (resolved: {g})")
-
-    # Load model backend
-    device_obj = select_device(device)
-    backend = DetectMultiBackend(str(weights_path_p), device=device_obj)
+    
+    # Pre-load weights with weights_only=False to handle PyTorch 2.6+ security changes
+    try:
+        weights_dict = torch.load(str(weights_path_p), map_location="cpu", weights_only=False)
+    except TypeError:
+        # Fallback for older PyTorch versions
+        weights_dict = torch.load(str(weights_path_p), map_location="cpu")
+    
+    # Create a temporary file with the loaded weights to pass to DetectMultiBackend
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as tmp_file:
+        torch.save(weights_dict, tmp_file.name)
+        tmp_weights_path = tmp_file.name
+    
+    try:
+        backend = DetectMultiBackend(tmp_weights_path, device=device_obj)
+    finally:
+        # Clean up temporary file
+        import os
+        os.unlink(tmp_weights_path)
 
     stride = int(backend.stride)
     imgsz_checked = check_img_size(imgsz, s=stride)
@@ -127,7 +146,13 @@ def extract_yolov5_latents(
     torch_model = backend.model
 
     # Attach hooks (LatentExtractor knows how to index a Sequential-like model)
-    extractor = LatentExtractor(torch_model, modules=modules, to_cpu=to_cpu, fp16=fp16)
+    extractor = LatentExtractor(
+        torch_model,
+        modules=modules,
+        to_cpu=to_cpu,
+        fp16=fp16,
+        target_mode="top_level",
+    )
 
     if warmup:
         backend.warmup(imgsz=(1, 3, imgsz_checked, imgsz_checked))

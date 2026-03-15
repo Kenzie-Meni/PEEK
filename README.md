@@ -2,7 +2,7 @@
 
 This is the official GitHub repository for Probabilistic Explanations for Entropic Knowledge extraction (PEEK), a method for visualizing CNN decisionmaking processes.
 
-The implementation currently works for YOLO (v5, v8, v11, 26). More will be added in the future. Requests for implementations for specific architectures should go to the owner of the repo and lead developer, Mackenzie Meni.
+The implementation currently works for YOLO (v5, v8, v11, 26) and torchvision-style PyTorch CNNs such as VGG16, ResNet50, and ConvNeXt. More will be added in the future. Requests for implementations for specific architectures should go to the owner of the repo and lead developer, Mackenzie Meni.
 
 Use of the PEEK method should cite the original paper:
 
@@ -29,3 +29,44 @@ This repository uses external model implementations as Git submodules to avoid v
 
 All modifications for latent extraction and PEEK are implemented via
 PyTorch forward hooks (see `peek/`), not by modifying upstream code.
+
+## PyTorch Model Support
+
+PEEK supports PyTorch image-classification backbones through a torch extractor that saves latents as per-image pickles, matching the YOLO workflows in this repo.
+
+### Features
+- **Post-activation convolutional latents**: The torch demo uses `capture_mode="conv_post_activation"` to collect latents immediately after convolution activations, where spatial coherence tends to remain most interpretable in PEEK.
+- **Torchvision preprocessing**: Handles ImageNet-style preprocessing for standard classification models.
+- **Flexible model loading**: Supports common torchvision model names and custom `torch.nn.Module` instances.
+- **Repo-relative outputs**: Feature maps are written under `feature_maps/` and figures under `figures/`, all relative to the repo root.
+
+### Usage
+
+```python
+from peek.extractors.torch import extract_torch_latents
+
+# Extract selected post-activation convolutional latents from ResNet50
+extract_torch_latents(
+    model="resnet50",
+    images_glob="path/to/images/*.jpg",
+    out_dir="feature_maps/resnet50_demo",
+    img_size=224,
+    modules=[0, 3, 12, 24, 42],
+    capture_mode="conv_post_activation",
+    device="cuda",
+    verbose=True,
+)
+
+# Visualize PEEK overlays for the same saved layers
+from peek import plot_PEEK
+plot_PEEK(
+    modules=[0, 3, 12, 24, 42],
+    image_dir="path/to/images",
+    feature_folder="feature_maps/resnet50_demo",
+    save_path="figures/resnet50_demo",
+    run_path=False,
+    verbose=True,
+)
+```
+
+See `notebooks/Torch_Demo.ipynb` for complete examples with VGG16, ResNet50, and ConvNeXt Base. `notebooks/YOLOv5_Demo.ipynb` and `notebooks/Ultralytics_Demo.ipynb` write rendered outputs to `figures/` and prediction overlays to `runs/peek_detect/`.
