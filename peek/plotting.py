@@ -26,6 +26,7 @@ from typing import List, Optional, Union
 import numpy as np
 import torch
 
+from peek.core import PEEK, tensor_to_hwc
 from peek.utils.paths import configure_ultralytics_dir, repo_path, resolve_weights
 
 
@@ -60,23 +61,6 @@ def _find_prediction_image(pred_dir: Path, image_path: Path) -> Optional[Path]:
     return matches[0] if matches else None
 
 
-# -----------------------
-# PEEK math (original)
-# -----------------------
-def _peek_entropy_map_hwc(feature_maps_hwc: np.ndarray) -> np.ndarray:
-    """
-    Original PEEK math:
-      positivized_maps = x + abs(min(x))
-      entropy_map = -sum(entr(positivized_maps), axis=-1)
-    """
-    from scipy.special import entr  # local import
-
-    x = feature_maps_hwc.astype(np.float32, copy=False)
-    x = x + float(np.abs(np.min(x)))
-    h = -np.sum(entr(x), axis=-1)
-    return h.astype(np.float32, copy=False)
-
-
 def _resize_map_hw(peek_hw: np.ndarray, out_h: int, out_w: int) -> np.ndarray:
     """
     Resize (H,W) -> (out_h,out_w).
@@ -85,49 +69,6 @@ def _resize_map_hw(peek_hw: np.ndarray, out_h: int, out_w: int) -> np.ndarray:
     import cv2  # local import
 
     return cv2.resize(peek_hw, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
-
-
-def _tensor_to_hwc(t: torch.Tensor) -> Optional[np.ndarray]:
-    """
-    Convert a tensor to HWC numpy for PEEK.
-
-    Accepts:
-      - (B,C,H,W) -> use batch 0 -> HWC
-      - (C,H,W)   -> HWC
-      - (H,W,C)   -> passthrough
-      - (B,H,W,C) -> use batch 0 -> HWC
-    """
-    if not isinstance(t, torch.Tensor):
-        return None
-
-    if t.ndim == 4:
-        b, d1, d2, d3 = t.shape
-        
-        # Check if this looks like (B,H,W,C) format
-        # Last dim is reasonable channel count and middle dims look spatial
-        channel_counts = {64, 128, 256, 512, 768, 1024, 2048, 4096}
-        if d3 in channel_counts and d1 >= 4 and d2 >= 4:
-            # Likely (B,H,W,C) -> already HWC after taking batch 0
-            return t[0].detach().float().cpu().contiguous().numpy()
-        elif d1 in channel_counts and d2 >= 4 and d3 >= 4:
-            # Likely (B,C,H,W) -> permute to HWC
-            return t[0].detach().float().cpu().permute(1, 2, 0).contiguous().numpy()
-        else:
-            # Fallback: assume (B,C,H,W) and permute
-            return t[0].detach().float().cpu().permute(1, 2, 0).contiguous().numpy()
-
-    if t.ndim == 3:
-        # Heuristic: if first dim looks like channels, treat as CHW
-        c, h, w = t.shape
-        if c <= 4096 and h >= 2 and w >= 2:
-            return t.detach().float().cpu().permute(1, 2, 0).contiguous().numpy()
-
-        # Otherwise assume already HWC
-        arr = t.detach().float().cpu().contiguous().numpy()
-        return arr
-
-    return None
-
 
 # -----------------------
 # Prediction generation
@@ -322,6 +263,8 @@ def plot_PEEK(
     """
     import matplotlib.pyplot as plt  # local import
 
+    peek = PEEK()
+
     image_dir = repo_path(image_dir)
     feature_folder = repo_path(feature_folder)
 
@@ -440,11 +383,11 @@ def plot_PEEK(
             if t is None:
                 axes[i, 1].text(0.02, 0.95, "missing", transform=axes[i, 1].transAxes)
             else:
-                hwc = _tensor_to_hwc(t)
+                hwc = tensor_to_hwc(t)
                 if hwc is None:
                     axes[i, 1].text(0.02, 0.95, "unsupported", transform=axes[i, 1].transAxes)
                 else:
-                    peek_hw = _peek_entropy_map_hwc(hwc)
+                    peek_hw = peek(hwc)
                     peek_hw = _resize_map_hw(peek_hw, out_h=h, out_w=w)
 
                     axes[i, 1].imshow(peek_hw, alpha=0.7, cmap="jet")

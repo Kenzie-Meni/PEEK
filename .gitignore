@@ -1,7 +1,9 @@
 # Artifacts
 feature_maps/
 figures/
+metrics/
 runs/
+analysis/
 
 # Python
 __pycache__/

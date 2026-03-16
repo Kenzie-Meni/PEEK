@@ -174,57 +174,8 @@ def _is_activation_module(module: torch.nn.Module) -> bool:
     return isinstance(module, _ACTIVATION_MODULES)
 
 
-def _node_depends_on_conv(
-    node,
-    modules_by_name: Dict[str, torch.nn.Module],
-    *,
-    seen: Optional[set] = None,
-) -> bool:
-    """
-    Walk backward from an activation node until we either find a conv layer
-    or hit a non-pass-through operation.
-    """
-    if seen is None:
-        seen = set()
-
-    node_id = id(node)
-    if node_id in seen:
-        return False
-    seen.add(node_id)
-
-    if node.op == "call_module":
-        name = str(node.target)
-        module = modules_by_name[name]
-        if _is_activation_module(module):
-            return False
-        if isinstance(module, torch.nn.Conv2d):
-            return True
-        if isinstance(module, _PASSTHROUGH_MODULES):
-            return any(
-                _node_depends_on_conv(inp, modules_by_name, seen=seen)
-                for inp in node.all_input_nodes
-            )
-        return False
-
-    if node.op == "call_function":
-        if node.target in _ACTIVATION_FUNCTIONS:
-            return False
-        if node.target in _PASSTHROUGH_FUNCTIONS:
-            return any(
-                _node_depends_on_conv(inp, modules_by_name, seen=seen)
-                for inp in node.all_input_nodes
-            )
-        return False
-
-    if node.op == "call_method":
-        if node.target in _PASSTHROUGH_METHODS:
-            return any(
-                _node_depends_on_conv(inp, modules_by_name, seen=seen)
-                for inp in node.all_input_nodes
-            )
-        return False
-
-    return False
+def _is_convnext_model(model: torch.nn.Module) -> bool:
+    return model.__class__.__name__ == "ConvNeXt"
 
 
 def _collect_conv_activation_nodes(model: torch.nn.Module) -> List[str]:
@@ -245,26 +196,39 @@ def _collect_conv_activation_nodes(model: torch.nn.Module) -> List[str]:
 
         return None
 
-    def is_conv_related_predecessor(node_name: str) -> bool:
-        module_name = resolve_module_name(node_name)
-        if module_name is not None:
-            module = modules_by_name[module_name]
-            return isinstance(module, (torch.nn.Conv2d, _PASSTHROUGH_MODULES))
-
-        return node_name == "add" or node_name.endswith(".add") or re.match(r"^add_\d+$", node_name) is not None
-
     for index, eval_name in enumerate(eval_names):
         module_name = resolve_module_name(eval_name)
         if module_name is None:
             continue
-        if not _is_activation_module(modules_by_name[module_name]):
+        module = modules_by_name[module_name]
+        if not _is_activation_module(module):
             continue
         if index == 0:
             continue
-        if is_conv_related_predecessor(eval_names[index - 1]):
+        predecessor_name = eval_names[index - 1]
+        predecessor_module_name = resolve_module_name(predecessor_name)
+        if predecessor_module_name is None:
+            continue
+        predecessor_module = modules_by_name[predecessor_module_name]
+        if isinstance(predecessor_module, (torch.nn.Conv2d, _PASSTHROUGH_MODULES)):
             selected.append(eval_name)
 
     return selected
+
+
+def _collect_convnext_block_names(model: torch.nn.Module) -> List[str]:
+    """
+    Return ConvNeXt CNBlock module names.
+
+    These block outputs are spatially coherent feature stacks and are a more
+    meaningful PEEK target for ConvNeXt than trying to force a generic
+    conv-post-activation rule onto its MLP-style block internals.
+    """
+    return [
+        name
+        for name, module in model.named_modules()
+        if module.__class__.__name__ == "CNBlock"
+    ]
 
 
 def _extract_torch_conv_activation_latents(
@@ -279,6 +243,54 @@ def _extract_torch_conv_activation_latents(
     return_first: bool,
     verbose: bool,
 ) -> Optional[Dict[int, torch.Tensor]]:
+    if _is_convnext_model(model):
+        block_names = _collect_convnext_block_names(model)
+        if not block_names:
+            raise ValueError("No ConvNeXt spatial block outputs were found for this model.")
+
+        selected_indices = list(range(len(block_names))) if modules is None else list(modules)
+        modules_by_name = dict(model.named_modules())
+        targets = [modules_by_name[block_names[i]] for i in selected_indices]
+
+        handles = []
+        first_cache = None
+
+        for p in paths:
+            input_tensor = _preprocess_image(p, img_size).to(device)
+            cache: Dict[int, torch.Tensor] = {}
+
+            def make_hook(index: int):
+                def hook(_module, _inputs, output):
+                    y = output.detach()
+                    if fp16:
+                        y = y.half()
+                    if to_cpu:
+                        y = y.cpu()
+                    cache[index] = y
+                return hook
+
+            for index, target in zip(selected_indices, targets):
+                handles.append(target.register_forward_hook(make_hook(index)))
+
+            try:
+                _ = model(input_tensor)
+            finally:
+                for handle in handles:
+                    handle.remove()
+                handles.clear()
+
+            if return_first and first_cache is None:
+                first_cache = dict(cache)
+
+            out_pkl = out_dir_p / f"{Path(p).stem}.pkl"
+            with open(out_pkl, "wb") as f:
+                pickle.dump(cache, f)
+
+            if verbose:
+                print(f"[torch] saved: {out_pkl}")
+
+        return first_cache if return_first else None
+
     node_names = _collect_conv_activation_nodes(model)
     if not node_names:
         raise ValueError("No post-activation conv nodes were found for this model.")

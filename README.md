@@ -70,3 +70,64 @@ plot_PEEK(
 ```
 
 See `notebooks/Torch_Demo.ipynb` for complete examples with VGG16, ResNet50, and ConvNeXt Base. `notebooks/YOLOv5_Demo.ipynb` and `notebooks/Ultralytics_Demo.ipynb` write rendered outputs to `figures/` and prediction overlays to `runs/peek_detect/`.
+
+## Downstream Metrics
+
+PEEK can also compute downstream layer metrics directly from saved latent pickles in `feature_maps/`.
+
+- **PEEK mean**:
+  `mu = (1 / lw) * sum_ij p_ij`
+- **PEEK variance**:
+  `sigma^2 = (1 / lw) * sum_ij (p_ij - mu)^2`
+- **RVC**:
+  `RVC_l = sigma_l^2 / (sigma_1^2 + ... + sigma_L^2)`
+
+Example:
+
+```python
+from peek import compute_feature_folder_metrics
+
+metrics = compute_feature_folder_metrics(
+    feature_folder="feature_maps/GSFC_satellite",
+    modules=[1, 7, 16, 19, 22],
+    out_csv="metrics/GSFC_satellite/per_image_metrics.csv",
+    summary_csv="metrics/GSFC_satellite/module_summary.csv",
+    verbose=True,
+)
+
+print(metrics["summary"])
+```
+
+This writes one CSV with per-image layer metrics (`peek_mean`, `peek_variance`, `rvc`) and one summary CSV with per-module mean/std aggregates across the processed images.
+
+## Analytic Studies
+
+The repo now also includes reusable code for the dense-head loss/variance studies that were previously only implemented ad hoc in `PEEK-RVC-Pruning`.
+
+Main entry points:
+
+```python
+from peek import (
+    GeometryConfig,
+    ImagenetteFineTuneConfig,
+    run_dense_head_analytic_study,
+    launch_imagenette_training_tmux,
+    train_imagenette_model,
+    run_vgg16_dense_head_analytic_study,
+    compare_geometry_csvs,
+    plot_dense_head_alignment_maps,
+)
+```
+
+- `train_imagenette_model(...)` fine-tunes the ImageNet-pretrained one-dense-head variants used in these studies. For VGG16, ResNet50, and ConvNeXt-Base, this means the final spatial feature block is flattened directly into a single 10-way dense layer.
+- `launch_imagenette_training_tmux(...)` starts one of those training jobs in a detached `tmux` session for long SSH runs.
+- `run_dense_head_analytic_study(...)` runs the trained-vs-random-head sweep for any of those one-dense-head models, writes per-image CSV summaries, and can save per-image NPZ blobs containing `T1`, `T2`, `T3`, PEEK, and sweep grids.
+- `run_vgg16_dense_head_analytic_study(...)` runs the trained-vs-random-head sweep, writes per-image CSV summaries, and optionally saves per-image NPZ blobs containing `T1`, `T2`, `T3`, PEEK, and sweep grids.
+- `compare_geometry_csvs(...)` aggregates metric differences and correlations between trained and random heads.
+- `plot_dense_head_alignment_maps(...)` renders the alignment overlays and heatmaps from a saved NPZ blob.
+
+Notebook entry points:
+
+- `notebooks/VGG16_Demo.ipynb` launches the VGG16 one-dense-head Imagenette2 fine-tune and then runs the reusable trained-vs-random-head analytic study.
+- `notebooks/ResNet50_Imagenette_Demo.ipynb` launches the analogous ResNet50 one-dense-head Imagenette2 fine-tune.
+- `notebooks/ConvNeXt_Imagenette_Demo.ipynb` launches the analogous ConvNeXt-Base one-dense-head Imagenette2 fine-tune.
