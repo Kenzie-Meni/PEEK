@@ -4,6 +4,7 @@ figures/
 metrics/
 runs/
 analysis/
+checkpoints/
 
 # Python
 __pycache__/
