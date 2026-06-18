@@ -32,5 +32,4 @@ dev = [
 ]
 
 [tool.setuptools]
-# If your package directory is literally "peek/"
-packages = ["peek"]
+packages = ["peek", "peek.extractors", "peek.utils"]

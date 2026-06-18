@@ -1,0 +1,30 @@
+# 27/999 iterations complete ✅ (20368.80s)
+# Results saved to /home/rwhite/NFS/Ryan/PEEK/runs/segment/peek_yolo26s_seg_tune_balanced_640_gpu0_tmux/tune
+# Best fitness=0.75012 observed at iteration 15
+# Best fitness metrics are {'metrics/precision(B)': 0.64946, 'metrics/recall(B)': 0.49936, 'metrics/mAP50(B)': 0.53349, 'metrics/mAP50-95(B)': 0.39735, 'metrics/precision(M)': 0.63598, 'metrics/recall(M)': 0.4819, 'metrics/mAP50(M)': 0.5132, 'metrics/mAP50-95(M)': 0.35278, 'val/box_loss': 1.08755, 'val/seg_loss': 1.92586, 'val/cls_loss': 1.90404, 'val/dfl_loss': 0.00753, 'val/sem_loss': 0.0, 'fitness': 0.75012}
+# Best fitness model is /home/rwhite/NFS/Ryan/PEEK/runs/segment/peek_yolo26s_seg_tune_balanced_640_gpu0_tmux/train
+lr0: 0.003
+lrf: 0.01
+momentum: 0.97
+weight_decay: 0.00037
+warmup_epochs: 3.04692
+warmup_momentum: 0.86097
+box: 6.13008
+cls: 0.52294
+dfl: 1.56282
+hsv_h: 0.015
+hsv_s: 0.41661
+hsv_v: 0.29161
+degrees: 0.00031
+translate: 0.06953
+scale: 0.23363
+shear: 0.00151
+perspective: 0.00021
+flipud: 0.00326
+fliplr: 0.58576
+bgr: 0.00328
+mosaic: 0.23734
+mixup: 0.00307
+cutmix: 0.00119
+copy_paste: 0.00313
+close_mosaic: 11

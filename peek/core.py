@@ -45,4 +45,4 @@ class PEEK:
     def resize(self, peek_map_hw: np.ndarray, out_hw: tuple[int, int]) -> np.ndarray:
         # cv2.resize expects (width, height)
         h, w = out_hw
-        return cv2.resize(peek_map_hw, (h, w))
+        return cv2.resize(peek_map_hw, (w, h))

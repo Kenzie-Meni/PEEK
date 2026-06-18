@@ -29,3 +29,36 @@ This repository uses external model implementations as Git submodules to avoid v
 
 All modifications for latent extraction and PEEK are implemented via
 PyTorch forward hooks (see `peek/`), not by modifying upstream code.
+
+## PEEK-assisted tracking
+
+The hook refactor also supports an online tracking path for YOLO26-style
+Ultralytics models. `YOLOPEEKTracker` runs YOLO inference, captures selected
+latent modules with hooks, proposes PEEK recovery regions, and associates both
+YOLO detections and PEEK regions into bbox/mask tracks.
+
+```python
+from peek.tracking import YOLOPEEKTracker, draw_tracks
+
+with YOLOPEEKTracker("weights/yolo26s.pt", peek_modules=[16, 19, 22]) as tracker:
+    for frame_result in tracker.track_video("input.mp4"):
+        # frame_result.tracks contains bbox tracks; masks are present for
+        # segmentation-capable YOLO weights.
+        print(frame_result.frame_index, len(frame_result.tracks), frame_result.latency_ms)
+```
+
+PEEK recovery tracks are marked with `source="peek"` so experiments can compare
+plain YOLO tracking against PEEK-assisted track continuity.
+
+For the current YOLO26 bbox model, `weights/yolo26s_peek_bbox_best.pt` points to
+the best 640px checkpoint from the mAP sweep. A runnable tracker CLI writes an
+annotated video and JSONL track records:
+
+```bash
+python tools/track_yolo26_peek.py \
+  --source /path/to/video_or_frame_directory \
+  --weights weights/yolo26s_peek_bbox_best.pt \
+  --output runs/track/peek_yolo26_tracking.mp4 \
+  --jsonl runs/track/peek_yolo26_tracking.jsonl \
+  --device 0
+```
