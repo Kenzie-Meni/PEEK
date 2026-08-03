@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import sys
 import time
-from typing import Iterable, Optional, Sequence, Union
+from typing import Iterable, Optional, Protocol, Sequence, Union
 
 import cv2
 import numpy as np
@@ -30,6 +30,118 @@ from peek.utils.paths import configure_ultralytics_dir, repo_path, resolve_weigh
 
 
 ArrayLikeFrame = Union[str, Path, np.ndarray]
+
+
+def xyxy_to_cxcywh(box: np.ndarray) -> np.ndarray:
+    x1, y1, x2, y2 = box.astype(np.float32)
+    return np.array(
+        [
+            (x1 + x2) / 2.0,
+            (y1 + y2) / 2.0,
+            max(1.0, x2 - x1),
+            max(1.0, y2 - y1),
+        ],
+        dtype=np.float32,
+    )
+
+
+def cxcywh_to_xyxy(box: np.ndarray) -> np.ndarray:
+    cx, cy, w, h = box.astype(np.float32)
+    return np.array([cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0], dtype=np.float32)
+
+
+class MotionModel(Protocol):
+    """Small interface for per-track motion prediction."""
+
+    def initiate(self, xyxy: np.ndarray) -> None:
+        ...
+
+    def predict(self) -> np.ndarray:
+        ...
+
+    def update(self, xyxy: np.ndarray) -> np.ndarray:
+        ...
+
+
+class NoMotionModel:
+    """Current tracker behavior: use the last observed box as the prediction."""
+
+    def __init__(self) -> None:
+        self.xyxy = np.zeros(4, dtype=np.float32)
+
+    def initiate(self, xyxy: np.ndarray) -> None:
+        self.xyxy = xyxy.astype(np.float32, copy=True)
+
+    def predict(self) -> np.ndarray:
+        return self.xyxy.astype(np.float32, copy=True)
+
+    def update(self, xyxy: np.ndarray) -> np.ndarray:
+        self.xyxy = xyxy.astype(np.float32, copy=True)
+        return self.predict()
+
+
+class ConstantVelocityBoxKalman:
+    """
+    Constant-velocity Kalman model over box center and size.
+
+    State is [cx, cy, w, h, vcx, vcy, vw, vh]. Measurements are [cx, cy, w, h].
+    """
+
+    def __init__(self, process_noise: float = 1.0, measurement_noise: float = 10.0) -> None:
+        self.process_noise = float(process_noise)
+        self.measurement_noise = float(measurement_noise)
+        self.x = np.zeros((8, 1), dtype=np.float32)
+        self.p = np.eye(8, dtype=np.float32) * 10.0
+        self.f = np.eye(8, dtype=np.float32)
+        for i in range(4):
+            self.f[i, i + 4] = 1.0
+        self.h = np.zeros((4, 8), dtype=np.float32)
+        self.h[:4, :4] = np.eye(4, dtype=np.float32)
+        self.initiated = False
+
+    def initiate(self, xyxy: np.ndarray) -> None:
+        measurement = xyxy_to_cxcywh(xyxy)
+        self.x = np.zeros((8, 1), dtype=np.float32)
+        self.x[:4, 0] = measurement
+        self.p = np.eye(8, dtype=np.float32) * 10.0
+        self.p[4:, 4:] *= 100.0
+        self.initiated = True
+
+    def predict(self) -> np.ndarray:
+        if not self.initiated:
+            return np.zeros(4, dtype=np.float32)
+        q = np.eye(8, dtype=np.float32) * self.process_noise
+        q[4:, 4:] *= 2.0
+        self.x = self.f @ self.x
+        self.x[2:4, 0] = np.maximum(self.x[2:4, 0], 1.0)
+        self.p = self.f @ self.p @ self.f.T + q
+        return cxcywh_to_xyxy(self.x[:4, 0])
+
+    def update(self, xyxy: np.ndarray) -> np.ndarray:
+        if not self.initiated:
+            self.initiate(xyxy)
+            return xyxy.astype(np.float32, copy=True)
+        z = xyxy_to_cxcywh(xyxy).reshape(4, 1)
+        r = np.eye(4, dtype=np.float32) * self.measurement_noise
+        innovation = z - self.h @ self.x
+        s = self.h @ self.p @ self.h.T + r
+        k = self.p @ self.h.T @ np.linalg.inv(s)
+        self.x = self.x + k @ innovation
+        self.x[2:4, 0] = np.maximum(self.x[2:4, 0], 1.0)
+        self.p = (np.eye(8, dtype=np.float32) - k @ self.h) @ self.p
+        return cxcywh_to_xyxy(self.x[:4, 0])
+
+
+def create_motion_model(
+    name: str,
+    process_noise: float = 1.0,
+    measurement_noise: float = 10.0,
+) -> MotionModel:
+    if name == "none":
+        return NoMotionModel()
+    if name == "constant_velocity":
+        return ConstantVelocityBoxKalman(process_noise=process_noise, measurement_noise=measurement_noise)
+    raise ValueError(f"Unknown motion model: {name}")
 
 
 @dataclass
@@ -76,10 +188,12 @@ class TrackState:
     hits: int = 1
     missed: int = 0
     history: list[np.ndarray] = field(default_factory=list)
+    motion_model: Optional[MotionModel] = None
 
     def update(self, det: TrackedDetection) -> None:
         self.history.append(self.xyxy.copy())
-        self.xyxy = det.xyxy.astype(np.float32, copy=True)
+        observed = det.xyxy.astype(np.float32, copy=True)
+        self.xyxy = self.motion_model.update(observed) if self.motion_model is not None else observed
         self.score = float(det.score)
         self.cls = det.cls if det.cls is not None else self.cls
         if det.source == "yolo":
@@ -101,6 +215,10 @@ class TrackState:
         self.missed += 1
         self.source = "predicted"
         self.mask = None
+
+    def predict_motion(self) -> None:
+        if self.motion_model is not None:
+            self.xyxy = self.motion_model.predict()
 
     @property
     def confirmed(self) -> bool:
@@ -468,6 +586,9 @@ class PEEKAssistedTracker:
         min_yolo_conf: float = 0.25,
         spawn_peek_tracks: bool = True,
         min_peek_score: float = 0.12,
+        motion_model: str = "none",
+        motion_process_noise: float = 1.0,
+        motion_measurement_noise: float = 10.0,
     ):
         self.iou_threshold = float(iou_threshold)
         self.peek_iou_threshold = float(peek_iou_threshold)
@@ -475,6 +596,9 @@ class PEEKAssistedTracker:
         self.min_yolo_conf = float(min_yolo_conf)
         self.spawn_peek_tracks = bool(spawn_peek_tracks)
         self.min_peek_score = float(min_peek_score)
+        self.motion_model = motion_model
+        self.motion_process_noise = float(motion_process_noise)
+        self.motion_measurement_noise = float(motion_measurement_noise)
         self.tracks: list[TrackState] = []
         self.next_id = 1
 
@@ -484,6 +608,8 @@ class PEEKAssistedTracker:
         peek_detections: Sequence[TrackedDetection],
     ) -> list[TrackState]:
         active_tracks = list(self.tracks)
+        for track in active_tracks:
+            track.predict_motion()
         unmatched_tracks = set(range(len(active_tracks)))
         unmatched_yolo = set(range(len(yolo_detections)))
 
@@ -507,19 +633,7 @@ class PEEKAssistedTracker:
             det = yolo_detections[di]
             if det.score < self.min_yolo_conf:
                 continue
-            active_tracks.append(
-                TrackState(
-                    track_id=self.next_id,
-                    xyxy=det.xyxy.astype(np.float32, copy=True),
-                    score=float(det.score),
-                    cls=det.cls,
-                    mask=det.mask,
-                    source=det.source,
-                    origin="yolo",
-                    module=det.module,
-                    modules=det.modules,
-                )
-            )
+            active_tracks.append(self._new_track(det, origin="yolo"))
             self.next_id += 1
 
         if self.spawn_peek_tracks:
@@ -527,23 +641,32 @@ class PEEKAssistedTracker:
                 det = peek_detections[di]
                 if det.score < self.min_peek_score:
                     continue
-                active_tracks.append(
-                    TrackState(
-                        track_id=self.next_id,
-                        xyxy=det.xyxy.astype(np.float32, copy=True),
-                        score=float(det.score),
-                        cls=det.cls,
-                        mask=det.mask,
-                        source=det.source,
-                        origin="peek",
-                        module=det.module,
-                        modules=det.modules or (() if det.module is None else (det.module,)),
-                    )
-                )
+                active_tracks.append(self._new_track(det, origin="peek"))
                 self.next_id += 1
 
         self.tracks = [t for t in active_tracks if t.missed <= self.max_missed]
         return list(self.tracks)
+
+    def _new_track(self, det: TrackedDetection, origin: str) -> TrackState:
+        xyxy = det.xyxy.astype(np.float32, copy=True)
+        motion = create_motion_model(
+            self.motion_model,
+            process_noise=self.motion_process_noise,
+            measurement_noise=self.motion_measurement_noise,
+        )
+        motion.initiate(xyxy)
+        return TrackState(
+            track_id=self.next_id,
+            xyxy=xyxy,
+            score=float(det.score),
+            cls=det.cls,
+            mask=det.mask,
+            source=det.source,
+            origin=origin,
+            module=det.module,
+            modules=det.modules or (() if det.module is None else (det.module,)),
+            motion_model=motion,
+        )
 
     def _greedy_matches(
         self,
@@ -619,6 +742,9 @@ class YOLOPEEKTracker:
         use_shadow_yolo_as_peek_anchor: bool = True,
         suppress_peek_yolo_iou: float = 0.10,
         suppress_peek_yolo_containment: float = 0.55,
+        motion_model: str = "none",
+        motion_process_noise: float = 1.0,
+        motion_measurement_noise: float = 10.0,
     ):
         configure_ultralytics_dir()
         _add_ultralytics_to_syspath()
@@ -666,7 +792,12 @@ class YOLOPEEKTracker:
         self.extractor.start()
 
         self.proposer = proposer or PEEKRegionProposer(peek_modules)
-        self.tracker = tracker or PEEKAssistedTracker(min_yolo_conf=conf)
+        self.tracker = tracker or PEEKAssistedTracker(
+            min_yolo_conf=conf,
+            motion_model=motion_model,
+            motion_process_noise=motion_process_noise,
+            motion_measurement_noise=motion_measurement_noise,
+        )
         self.frame_index = 0
 
     def close(self) -> None:

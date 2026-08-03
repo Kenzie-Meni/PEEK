@@ -490,6 +490,24 @@ def main() -> None:
         default=0.55,
         help="Drop PEEK proposals whose area is mostly covered by a current YOLO detection.",
     )
+    parser.add_argument(
+        "--motion-model",
+        choices=["none", "constant_velocity"],
+        default="none",
+        help="Per-track motion model used before association.",
+    )
+    parser.add_argument(
+        "--motion-process-noise",
+        type=float,
+        default=1.0,
+        help="Process noise for motion models that use uncertainty.",
+    )
+    parser.add_argument(
+        "--motion-measurement-noise",
+        type=float,
+        default=10.0,
+        help="Measurement noise for motion models that use uncertainty.",
+    )
     parser.add_argument("--max-frames", type=int, default=0, help="0 means no limit.")
     parser.add_argument("--no-video", action="store_true", help="Only write JSONL, no annotated video.")
     parser.add_argument(
@@ -579,6 +597,9 @@ def main() -> None:
         use_shadow_yolo_as_peek_anchor=args.shadow_yolo_as_peek_anchor,
         suppress_peek_yolo_iou=args.suppress_peek_yolo_iou,
         suppress_peek_yolo_containment=args.suppress_peek_yolo_containment,
+        motion_model=args.motion_model,
+        motion_process_noise=args.motion_process_noise,
+        motion_measurement_noise=args.motion_measurement_noise,
     ) as tracker, jsonl_path.open("w", encoding="utf-8") as handle:
         pending = [(first_index, first_frame)]
         for _, frame in pending:
