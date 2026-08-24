@@ -5,7 +5,8 @@ Extracts intermediate activations ("latents after a module") from an Ultralytics
 YOLO model using forward hooks.
 
 Vendor path:
-    third_party/ultralytics
+    third_party/ultralytics (used only if the caller hasn't already imported
+    `ultralytics` themselves -- see _add_ultralytics_to_syspath below)
 
 Weights:
     - Pass a local path like "weights/yolo26s.pt" (preferred)
@@ -33,10 +34,21 @@ from peek.utils.paths import configure_ultralytics_dir, repo_path, resolve_weigh
 # -----------------------
 # Ultralytics vendor path
 # -----------------------
-def _add_ultralytics_to_syspath() -> Path:
+def _add_ultralytics_to_syspath() -> Optional[Path]:
     """
     Adds the vendored Ultralytics repo to sys.path so imports resolve to the submodule.
+
+    If a caller has already imported `ultralytics` (e.g. embedded in another
+    project with its own pinned checkout), that already-cached module is left
+    alone and nothing is added to sys.path. PEEK's own vendored copy is a
+    fallback for standalone use (its own notebooks, scripts, tests), not
+    something that should silently override a host project's pin -- doing so
+    would mean a checkpoint gets run through a different, unpinned Ultralytics
+    build than the one it was actually trained against.
     """
+    if "ultralytics" in sys.modules:
+        return None
+
     root = repo_path(".")
     ulta_root = (root / "third_party" / "ultralytics").resolve()
     if not ulta_root.exists():
