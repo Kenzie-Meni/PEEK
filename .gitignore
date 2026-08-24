@@ -23,3 +23,7 @@ notebooks/**/.ipynb_checkpoints/
 !weights/yolov5-satellite-components-det-baseline.pt
 
 peek.egg-info/
+
+# Notebook-generated latent caches (regenerate by rerunning the notebook)
+notebooks/latents_vgg19/
+notebooks/temp_samples/
