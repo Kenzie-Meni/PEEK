@@ -26,6 +26,7 @@ from typing import List, Optional, Union
 import numpy as np
 import torch
 
+from peek.core import PEEK, tensor_to_hwc
 from peek.utils.paths import configure_ultralytics_dir, repo_path, resolve_weights
 
 
@@ -43,25 +44,21 @@ def _iter_images(image_dir: Path, limit: int = 0) -> List[Path]:
     return paths
 
 
-# -----------------------
-# PEEK math (original)
-# -----------------------
-def _peek_entropy_map_hwc(feature_maps_hwc: np.ndarray) -> np.ndarray:
+def _find_prediction_image(pred_dir: Path, image_path: Path) -> Optional[Path]:
     """
-    Original PEEK math:
-      positivized_maps = x + abs(min(x))
-      entropy_map = -sum(entr(positivized_maps), axis=-1)
+    Match a prediction image by stem so differing input/output extensions still resolve.
     """
-    from scipy.special import entr  # local import
+    exact = pred_dir / image_path.name
+    if exact.exists():
+        return exact
 
-    x = feature_maps_hwc.astype(np.float32, copy=False)
+    for ext in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"):
+        candidate = pred_dir / f"{image_path.stem}{ext}"
+        if candidate.exists():
+            return candidate
 
-    # Shift so the minimum becomes zero (same behavior as your original)
-    x = x + float(np.abs(np.min(x)))
-
-    # Elementwise entr(x) = -x * log(x) with entr(0) = 0
-    h = -np.sum(entr(x), axis=-1)
-    return h.astype(np.float32, copy=False)
+    matches = sorted(p for p in pred_dir.glob(f"{image_path.stem}.*") if p.is_file() and _is_image(p))
+    return matches[0] if matches else None
 
 
 def _resize_map_hw(peek_hw: np.ndarray, out_h: int, out_w: int) -> np.ndarray:
@@ -72,36 +69,6 @@ def _resize_map_hw(peek_hw: np.ndarray, out_h: int, out_w: int) -> np.ndarray:
     import cv2  # local import
 
     return cv2.resize(peek_hw, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
-
-
-def _tensor_to_hwc(t: torch.Tensor) -> Optional[np.ndarray]:
-    """
-    Convert a tensor to HWC numpy for PEEK.
-
-    Accepts:
-      - (B,C,H,W) -> use batch 0 -> HWC
-      - (C,H,W)   -> HWC
-      - (H,W,C)   -> passthrough
-    """
-    if not isinstance(t, torch.Tensor):
-        return None
-
-    if t.ndim == 4:
-        t0 = t[0]
-        return t0.detach().float().cpu().permute(1, 2, 0).contiguous().numpy()
-
-    if t.ndim == 3:
-        # Heuristic: if first dim looks like channels, treat as CHW
-        c, h, w = t.shape
-        if c <= 4096 and h >= 2 and w >= 2:
-            return t.detach().float().cpu().permute(1, 2, 0).contiguous().numpy()
-
-        # Otherwise assume already HWC
-        arr = t.detach().float().cpu().contiguous().numpy()
-        return arr
-
-    return None
-
 
 # -----------------------
 # Prediction generation
@@ -296,6 +263,8 @@ def plot_PEEK(
     """
     import matplotlib.pyplot as plt  # local import
 
+    peek = PEEK()
+
     image_dir = repo_path(image_dir)
     feature_folder = repo_path(feature_folder)
 
@@ -414,18 +383,19 @@ def plot_PEEK(
             if t is None:
                 axes[i, 1].text(0.02, 0.95, "missing", transform=axes[i, 1].transAxes)
             else:
-                hwc = _tensor_to_hwc(t)
+                hwc = tensor_to_hwc(t)
                 if hwc is None:
                     axes[i, 1].text(0.02, 0.95, "unsupported", transform=axes[i, 1].transAxes)
                 else:
-                    peek_hw = _peek_entropy_map_hwc(hwc)
+                    peek_hw = peek(hwc)
                     peek_hw = _resize_map_hw(peek_hw, out_h=h, out_w=w)
+
                     axes[i, 1].imshow(peek_hw, alpha=0.7, cmap="jet")
 
             # Predictions
             if pred_dir is not None:
-                pred_img_path = pred_dir / img_path.name
-                if pred_img_path.exists():
+                pred_img_path = _find_prediction_image(pred_dir, img_path)
+                if pred_img_path is not None:
                     pred_img = plt.imread(str(pred_img_path))
                     axes[i, 2].imshow(pred_img)
                 else:
